@@ -1,5 +1,6 @@
 import os
 import cv2
+import json
 import torch
 import collections
 import numpy as np
@@ -8,17 +9,22 @@ from src.models.cslr_bilstm import LightweightCSLR
 from src.translation.decoder import CTCDecoder
 
 def run_realtime():
-    # Index to gloss dictionary mapping
-    idx_to_gloss = {1: "HELLO", 2: "THANK_YOU", 3: "PLEASE", 4: "HELP", 5: "NAME"}
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LightweightCSLR(input_dim=225, num_classes=len(idx_to_gloss) + 1)
-    
+    label_map_path = "checkpoints/label_map.json"
     checkpoint_path = "checkpoints/best_isl_model.pth"
-    if not os.path.exists(checkpoint_path):
-        print(f"Model checkpoint '{checkpoint_path}' not found. Please run train.py first.")
+
+    if not os.path.exists(label_map_path) or not os.path.exists(checkpoint_path):
+        print("Missing model checkpoint or label map. Please run 'python train.py' first.")
         return
 
+    # Load dynamic index-to-gloss dictionary (JSON keys load as strings, convert to int)
+    with open(label_map_path, "r") as f:
+        raw_idx_map = json.load(f)
+    idx_to_gloss = {int(k): v for k, v in raw_idx_map.items()}
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    num_classes = len(idx_to_gloss) + 1  # Glosses + CTC Blank
+    
+    model = LightweightCSLR(input_dim=225, num_classes=num_classes)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
