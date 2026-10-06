@@ -1,0 +1,21 @@
+Set-Content -Path ".gitignore" -Value @"
+# Virtual Environment
+isl_env/
+venv/
+__pycache__/
+*.pyc
+
+# Raw Data & Extracted Features
+data/raw_data/*
+!data/raw_data/.gitkeep
+data/processed_features/*
+!data/processed_features/.gitkeep
+
+# Saved Model Checkpoints
+checkpoints/*
+!checkpoints/.gitkeep
+
+# System & IDE
+.vscode/
+.DS_Store
+"@
