@@ -2,90 +2,96 @@ import os
 import json
 import torch
 import numpy as np
-from collections import Counter
 from torch.utils.data import Dataset, Subset
 
 class ISLDataset(Dataset):
-    """
-    PyTorch Dataset wrapper for ISL keypoint features.
-    """
-    def __init__(self, features_dir="data/processed_features"):
-        self.features_dir = features_dir
-        metadata_path = os.path.join(features_dir, "dataset_metadata.json")
-
-        if not os.path.exists(metadata_path):
-            raise FileNotFoundError(f"Metadata file '{metadata_path}' not found. Run process_dataset.py first.")
-
-        with open(metadata_path, "r") as f:
-            self.metadata = json.load(f)
-
+    def __init__(self, feature_dir="data/processed_features"):
+        self.feature_dir = feature_dir
+        self.metadata_path = os.path.join(feature_dir, "dataset_metadata.json")
+        
+        if not os.path.exists(self.metadata_path):
+            raise FileNotFoundError(f"Metadata file not found at {self.metadata_path}")
+            
+        with open(self.metadata_path, "r") as f:
+            self.metadata = json.load(f)  # dict: {filename.npy: gloss_str}
+            
         self.file_list = list(self.metadata.keys())
         
-        # Generate dynamic gloss-to-index mapping (Reserve Index 0 for CTC Blank)
+        # Build class index mapping
         unique_glosses = sorted(list(set(self.metadata.values())))
-        self.gloss_to_idx = {gloss: idx + 1 for idx, gloss in enumerate(unique_glosses)}
-        self.idx_to_gloss = {idx: gloss for gloss, idx in self.gloss_to_idx.items()}
-
+        self.label_to_idx = {gloss: idx for idx, gloss in enumerate(unique_glosses)}
+        self.idx_to_label = {idx: gloss for gloss, idx in self.label_to_idx.items()}
+        
     def __len__(self):
         return len(self.file_list)
-
+        
     def __getitem__(self, idx):
-        file_name = self.file_list[idx]
-        file_path = os.path.join(self.features_dir, file_name)
+        filename = self.file_list[idx]
+        file_path = os.path.join(self.feature_dir, filename)
+        
+        feature = np.load(file_path)  # Shape: (T, 288)
+        feature_tensor = torch.tensor(feature, dtype=torch.float32)
+        
+        gloss = self.metadata[filename]
+        label_idx = self.label_to_idx[gloss]
+        
+        return feature_tensor, label_idx
 
-        gloss = self.metadata[file_name]
-        label = self.gloss_to_idx[gloss]
-
-        features = np.load(file_path)  # Shape: (Num_Frames, Feature_Dim)
-        return torch.tensor(features, dtype=torch.float32), torch.tensor(label, dtype=torch.long)
 
 def pad_collate_fn(batch):
     """
-    Pads variable-length frame feature sequences within a batch.
+    Pads dynamic frame sequences in a batch to the longest sequence in that batch.
     """
-    sequences, labels = zip(*batch)
-    lengths = torch.tensor([len(seq) for seq in sequences], dtype=torch.long)
-    padded_sequences = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)
-    labels = torch.tensor(labels, dtype=torch.long)
+    features, labels = zip(*batch)
     
-    # Required format for PyTorch CTC loss targets
+    input_lengths = torch.tensor([f.size(0) for f in features], dtype=torch.long)
     target_lengths = torch.ones(len(labels), dtype=torch.long)
-    return padded_sequences, labels, lengths, target_lengths
+    
+    padded_features = torch.nn.utils.rnn.pad_sequence(features, batch_first=True, padding_value=0.0)
+    targets = torch.tensor(labels, dtype=torch.long)
+    
+    return padded_features, targets, input_lengths, target_lengths
 
-def split_dataset(dataset, val_ratio=0.2, seed=42):
-    """
-    Splits dataset into Train and Validation sets.
-    Single-sample classes are automatically forced into Train set.
-    """
-    np.random.seed(seed)
-    gloss_counts = Counter([dataset.metadata[f] for f in dataset.file_list])
 
+def split_dataset_single_sample_aware(dataset, test_size=0.15, seed=42):
+    """
+    Splits ISLDataset into Train and Validation subsets safely.
+    Classes with only 1 sample are automatically routed to Train set to prevent stratification errors.
+    Also saves checkpoints/label_map.json.
+    """
+    os.makedirs("checkpoints", exist_ok=True)
+    
+    class_indices = {}
+    for idx, filename in enumerate(dataset.file_list):
+        gloss = dataset.metadata[filename]
+        label_idx = dataset.label_to_idx[gloss]
+        if label_idx not in class_indices:
+            class_indices[label_idx] = []
+        class_indices[label_idx].append(idx)
+        
     train_indices = []
     val_indices = []
-
-    # Group file indices by gloss
-    gloss_to_indices = {}
-    for idx, f in enumerate(dataset.file_list):
-        gloss = dataset.metadata[f]
-        gloss_to_indices.setdefault(gloss, []).append(idx)
-
-    for gloss, indices in gloss_to_indices.items():
-        # Single sample classes go 100% into Training
-        if len(indices) < 2:
+    
+    np.random.seed(seed)
+    
+    for label_idx, indices in class_indices.items():
+        if len(indices) == 1:
             train_indices.extend(indices)
         else:
-            np.random.shuffle(indices)
-            n_val = max(1, int(len(indices) * val_ratio))
-            val_indices.extend(indices[:n_val])
-            train_indices.extend(indices[n_val:])
-
-    train_subset = Subset(dataset, train_indices)
-    val_subset = Subset(dataset, val_indices)
-
-    print(f"Dataset Split Summary:")
-    print(f" - Total Samples : {len(dataset)}")
-    print(f" - Train Samples : {len(train_subset)}")
-    print(f" - Val Samples   : {len(val_subset)}")
-    print(f" - Total Classes : {len(dataset.gloss_to_idx)}")
-
-    return train_subset, val_subset
+            n_val = max(1, int(len(indices) * test_size))
+            if n_val >= len(indices):
+                n_val = len(indices) - 1
+            shuffled = np.random.permutation(indices)
+            val_indices.extend(shuffled[:n_val])
+            train_indices.extend(shuffled[n_val:])
+            
+    train_set = Subset(dataset, train_indices)
+    val_set = Subset(dataset, val_indices)
+    
+    num_classes = len(dataset.label_to_idx)
+    
+    label_map_path = os.path.join("checkpoints", "label_map.json")
+    with open(label_map_path, "w") as f:
+        json.dump(dataset.label_to_idx, f, indent=4)
+        
+    return train_set, val_set, num_classes, dataset.label_to_idx
