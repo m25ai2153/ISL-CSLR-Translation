@@ -24,7 +24,7 @@ def run_realtime():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_classes = len(idx_to_gloss) + 1  # Glosses + CTC Blank
     
-    model = LightweightCSLR(input_dim=225, num_classes=num_classes)
+    model = LightweightCSLR(input_dim=288, num_classes=num_classes)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)

@@ -2,8 +2,15 @@ import os
 import re
 import glob
 import json
+import sys
 import cv2
 import numpy as np
+
+# Add project root directory to Python's module search path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 from src.preprocessing.keypoint_extractor import KeypointExtractor
 
 def resolve_gloss_name(video_path, raw_dir):
