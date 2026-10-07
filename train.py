@@ -1,39 +1,47 @@
 import os
-import json
 import torch
 from torch.utils.data import DataLoader
-from src.preprocessing.dataset import ISLDataset, pad_collate_fn, split_dataset
+from src.preprocessing.dataset import ISLDataset, pad_collate_fn, split_dataset_single_sample_aware
 from src.models.trainer import train_model
 
 def main():
-    features_dir = "data/processed_features"
-
-    if not os.path.exists(features_dir) or not os.listdir(features_dir):
-        print(f"No processed feature arrays found in '{features_dir}'. Run process_dataset.py first.")
-        return
-
-    # Instantiate Dataset & auto-detect gloss vocabulary
-    dataset = ISLDataset(features_dir=features_dir)
+    feature_dir = "data/processed_features"
     
-    # Save active label map to checkpoints directory for real-time inference
-    os.makedirs("checkpoints", exist_ok=True)
-    with open("checkpoints/label_map.json", "w") as f:
-        json.dump(dataset.idx_to_gloss, f, indent=4)
+    # Load dataset and build single-sample aware train/val split
+    full_dataset = ISLDataset(feature_dir=feature_dir)
+    train_dataset, val_dataset, num_classes, label_map = split_dataset_single_sample_aware(full_dataset)
 
-    # Perform train/validation split
-    train_set, val_set = split_dataset(dataset, val_ratio=0.2)
+    print("Dataset Split Summary:")
+    print(f" - Total Samples : {len(full_dataset)}")
+    print(f" - Train Samples : {len(train_dataset)}")
+    print(f" - Val Samples   : {len(val_dataset)}")
+    print(f" - Total Classes : {num_classes}")
 
-    train_loader = DataLoader(train_set, batch_size=4, shuffle=True, collate_fn=pad_collate_fn)
-    val_loader = DataLoader(val_set, batch_size=4, shuffle=False, collate_fn=pad_collate_fn)
+    # DataLoaders
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=4, 
+        shuffle=True, 
+        collate_fn=pad_collate_fn,
+        num_workers=0
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=4, 
+        shuffle=False, 
+        collate_fn=pad_collate_fn,
+        num_workers=0
+    )
 
-    # Train Model (Number of classes = Unique Glosses + CTC Blank)
+    # Train Model (input_dim=288, num_classes + 1 for CTC blank token)
     train_model(
         train_loader=train_loader,
         val_loader=val_loader,
-        input_dim=225,
-        num_classes=len(dataset.gloss_to_idx) + 1,
-        epochs=30,
-        lr=1e-3
+        num_classes=num_classes + 1,  # CTC blank token added at end
+        input_dim=288,
+        epochs=50,
+        lr=1e-3,
+        device="cpu"
     )
 
 if __name__ == "__main__":

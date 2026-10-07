@@ -4,7 +4,20 @@ import torch.nn as nn
 import torch.optim as optim
 from src.models.cslr_bilstm import LightweightCSLR
 
-def train_model(train_loader, val_loader, num_classes, input_dim=288, num_epochs=50, lr=1e-3, device="cpu"):
+def train_model(
+    train_loader, 
+    val_loader, 
+    num_classes, 
+    input_dim=288, 
+    epochs=50, 
+    num_epochs=None, 
+    lr=1e-3, 
+    device="cpu", 
+    **kwargs
+):
+    # Support both 'epochs' and 'num_epochs' argument names
+    total_epochs = num_epochs if num_epochs is not None else epochs
+
     os.makedirs("checkpoints", exist_ok=True)
     checkpoint_path = "checkpoints/best_isl_model.pth"
 
@@ -20,7 +33,7 @@ def train_model(train_loader, val_loader, num_classes, input_dim=288, num_epochs
 
     print(f"Starting training on {device}... Total Classes: {num_classes} | Input Dim: {input_dim}")
 
-    for epoch in range(num_epochs):
+    for epoch in range(total_epochs):
         model.train()
         train_loss = 0.0
 
@@ -63,7 +76,7 @@ def train_model(train_loader, val_loader, num_classes, input_dim=288, num_epochs
 
         avg_val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else avg_train_loss
 
-        print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        print(f"Epoch [{epoch+1}/{total_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
         # Checkpoint saving
         if avg_val_loss < best_val_loss:
