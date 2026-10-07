@@ -2,15 +2,14 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from src.models.cslr_bilstm import LightweightCSLR
 
-def train_model(train_loader, val_loader, num_classes, num_epochs=50, lr=1e-3, device="cpu"):
+def train_model(train_loader, val_loader, num_classes, input_dim=288, num_epochs=50, lr=1e-3, device="cpu"):
     os.makedirs("checkpoints", exist_ok=True)
     checkpoint_path = "checkpoints/best_isl_model.pth"
 
-    # Initialize CSLR Model with input_dim=288
-    model = LightweightCSLR(input_dim=288, num_classes=num_classes).to(device)
+    # Initialize CSLR Model with dynamic input_dim
+    model = LightweightCSLR(input_dim=input_dim, num_classes=num_classes).to(device)
     
     # CTC Loss (blank index = num_classes - 1)
     blank_idx = num_classes - 1
@@ -19,7 +18,7 @@ def train_model(train_loader, val_loader, num_classes, num_epochs=50, lr=1e-3, d
 
     best_val_loss = float("inf")
 
-    print(f"Starting training on {device}... Total Classes: {num_classes}")
+    print(f"Starting training on {device}... Total Classes: {num_classes} | Input Dim: {input_dim}")
 
     for epoch in range(num_epochs):
         model.train()
